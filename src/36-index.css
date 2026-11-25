@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-body: "Inter", sans-serif;
+  --font-en: "IBM Plex Mono", monospace;
+  --font-ar: "Noto Naskh Arabic", serif;
+  --color-night: #0f1420;
+  --color-panel: #171e2e;
+  --color-panel2: #1d2639;
+  --color-ink: #e8eaf2;
+  --color-muted: #7a8199;
+  --color-amber: #f5a524;
+  --color-correct: #3fb68b;
+  --color-wrong: #e5534b;
+  --color-line: #2a3450;
+}
+
+html, body, #root { min-height: 100%; }
+body { font-family: var(--font-body); background: var(--color-night); color: var(--color-ink); }
+
+@keyframes caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.caret { animation: caret-blink 1.1s step-end infinite; }
+@keyframes rise { 0% { transform: translateY(10px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+.anim-rise { animation: rise 0.3s ease both; }
