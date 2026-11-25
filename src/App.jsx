@@ -77,7 +77,7 @@ export default function App() {
         setDone(true)
         setGrades((g) => {
           const ms = duration * 1000
-          const correctChars = g.reduce((n, ok, i) => n + (ok ? words[i].length + 1 : 0), 0)
+          const correctChars = g.reduce((n, ok, i) => n + (ok && words[i] ? words[i].length + 1 : 0), 0)
           const wpm = fmtWpm(correctChars, ms)
           const acc = g.length ? Math.round((g.filter(Boolean).length / g.length) * 100) : 0
           const entry = { lang, wpm, acc, when: Date.now() }
@@ -110,7 +110,7 @@ export default function App() {
         clearInterval(tickRef.current)
         setElapsed(ms)
         setDone(true)
-        const correctChars = newGrades.reduce((n, o, i) => n + (o ? words[i].length + 1 : 0), 0)
+        const correctChars = newGrades.reduce((n, o, i) => n + (o && words[i] ? words[i].length + 1 : 0), 0)
         const wpm = fmtWpm(correctChars, ms)
         const acc = newGrades.length ? Math.round((newGrades.filter(Boolean).length / newGrades.length) * 100) : 0
         const entry = { lang, wpm, acc, when: Date.now() }
@@ -128,7 +128,7 @@ export default function App() {
   }
 
   const liveMs = startAt ? elapsed : 0
-  const correctChars = grades.reduce((n, ok, i) => n + (ok ? words[i].length + 1 : 0), 0)
+  const correctChars = grades.reduce((n, ok, i) => n + (ok && words[i] ? words[i].length + 1 : 0), 0)
   const liveWpm = fmtWpm(correctChars, liveMs)
   const liveAcc = grades.length ? Math.round((grades.filter(Boolean).length / grades.length) * 100) : 100
   const remaining = Math.max(0, duration * 1000 - liveMs)
