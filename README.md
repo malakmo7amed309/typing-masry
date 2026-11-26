@@ -33,4 +33,4 @@ npm run dev
 
 ## Screenshot
 
-![Typing Masry](docs/screenshot.png)
+![Typing Masry](docs/showcase.gif)
