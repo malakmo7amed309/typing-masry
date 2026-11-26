@@ -10,11 +10,13 @@ Most typing tests grade per character, which breaks Arabic completely - coloring
 
 ## What else is in it
 
-- Timed tests: 30 / 60 / 90 seconds, clock starts on your first keystroke
-- Live WPM, accuracy and countdown
-- Results screen with correct words and per-language best score
-- Recent-tests history (last eight) saved in localStorage
-- Four passages per language, cycled so you rarely repeat
+- Four modes: **Timed** (30/60/90/120 seconds, the text never runs out), **Words** (25/50/100), **Passage** (a full real passage) and **Custom** (paste your own text)
+- Live WPM, accuracy and countdown. A **Focus** switch hides the numbers while you type
+- Results: WPM, accuracy, consistency, a speed-over-time chart, and the words you got wrong with what you typed
+- Progress panel: your tests, average and best WPM, a trend chart, filter by language, clear history. Everything stays in your browser (localStorage)
+- Personal best per language, with a "new personal best" badge
+- Text size buttons, Tab to restart, labelled controls for screen readers
+- About 150 common words per language for endless tests, plus four passages each
 
 ## Stack
 
@@ -29,8 +31,12 @@ npm install
 npm run dev
 ```
 
-`npm run build` produces the single-file build in `dist/`, which is what `docs/` serves through GitHub Pages.
+`npm test` runs the unit tests for the scoring functions (WPM, accuracy, consistency, summaries). `npm run build` produces the single-file build in `dist/`, which is what `docs/` serves through GitHub Pages.
 
-## Screenshot
+## Screenshots
 
-![Typing Masry](docs/showcase.gif)
+![Typing Masry](docs/screenshot.png)
+
+![Results](docs/screenshot-results.png)
+
+![Mobile](docs/screenshot-mobile.png)

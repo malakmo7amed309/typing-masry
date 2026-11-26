@@ -1,181 +1,132 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Results from './components/Results'
+import StatsPanel from './components/StatsPanel'
+import { useTypingTest } from './hooks/useTypingTest'
+import { load, remove, save } from './lib/storage'
 
-const PASSAGES = {
-  ar: [
-    'القاهرة مدينة لا تنام، تمشي في شوارعها في أي ساعة وتجد الناس والقهوة والضحك. من خان الخليلي إلى كورنيش النيل، كل زقاق له حكاية وكل قهوة لها زبائنها الذين يعرفون مقاعدهم بالاسم.',
-    'الأكل المصري له طعم مختلف، من الفول والطعمية في الصباح إلى الكشري في نص اليوم. أبسط الأكلات عندنا تجمع العيلة كلها حوالين سفرة واحدة، والأكل بيد الناس اللي بتحبك له بركة.',
-    'النيل يجري في مصر منذ آلاف السنين، شاهد على الفراعنة والملوك والثورات. المراكب الشراعية لسه بتمشي في مياهه بهدوء، كأن الزمن واقف عند ضفتيه، والغروب فوقه منظر لا يتكرر في بلد آخر.',
-    'الميكروباص عندنا مش مجرد مواصلات، ده مدرسة في الصبر والسرعة في نفس الوقت. السائق يعرف كل شارع وكل مختصر، والركاب يعدلوا الأجرة من إيد لإيد في ثواني من غير كلمة واحدة.',
-  ],
-  en: [
-    'The best typists do not look at their hands. They read a few words ahead, keep a steady rhythm, and let their fingers find the keys on their own. Speed comes from calm repetition, not from rushing.',
-    'Cairo is a city that rewards the curious. Behind every noisy street there is a quiet alley, behind every old door a courtyard, and behind every cup of tea a conversation that lasts three hours.',
-    'Learning to code is mostly learning to be patient with yourself. The error message is not an insult, it is a hint. Read it slowly, change one thing, run it again, and the bug will show itself.',
-    'A good portfolio does not list everything you have ever built. It shows three or four projects you care about, explains the choices you made, and proves you can finish what you start.',
-  ],
-}
-
-const fmtWpm = (correctChars, ms) => (ms <= 0 ? 0 : Math.round(correctChars / 5 / (ms / 60000)))
-
-function loadBest(lang) {
-  try { return JSON.parse(localStorage.getItem('tm-best-' + lang)) || null } catch { return null }
-}
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem('tm-history')) || [] } catch { return [] }
-}
+const MODES = [['time', 'Timed'], ['words', 'Words'], ['passage', 'Passage'], ['custom', 'Custom']]
+const LIMITS = { time: [30, 60, 90, 120], words: [25, 50, 100] }
+const SIZES = ['text-lg sm:text-xl', 'text-xl sm:text-2xl', 'text-2xl sm:text-3xl']
+const AR_SIZES = ['text-xl sm:text-2xl', 'text-2xl sm:text-3xl', 'text-3xl sm:text-4xl']
+const DEFAULT_SETTINGS = { lang: 'en', mode: 'time', limits: { time: 60, words: 50 }, size: 1, focus: false, custom: '' }
 
 export default function App() {
-  const [lang, setLang] = useState(() => localStorage.getItem('tm-lang') || 'en')
-  const [duration, setDuration] = useState(60)
-  const [passageIdx, setPassageIdx] = useState(() => Math.floor(Math.random() * PASSAGES.en.length))
-  const words = useMemo(() => PASSAGES[lang][passageIdx % PASSAGES[lang].length].split(' '), [lang, passageIdx])
-
-  const [wordIdx, setWordIdx] = useState(0)
-  const [current, setCurrent] = useState('')
-  const [grades, setGrades] = useState([]) // true/false per finished word
-  const [startAt, setStartAt] = useState(null)
-  const [elapsed, setElapsed] = useState(0)
-  const [done, setDone] = useState(false)
-  const [history, setHistory] = useState(loadHistory)
-  const inputRef = useRef(null)
-  const tickRef = useRef(null)
-
+  const [settings, setSettings] = useState(() => {
+    const s = { ...DEFAULT_SETTINGS, ...load('tm-settings', {}) }
+    const oldLang = localStorage.getItem('tm-lang') // from the first version
+    if (oldLang && !localStorage.getItem('tm-settings')) s.lang = oldLang
+    return s
+  })
+  const { lang, mode, limits, size, focus, custom } = settings
+  const limit = limits[mode] || 0
   const isAr = lang === 'ar'
-  const best = loadBest(lang)
+  const patch = (p) => setSettings((s) => ({ ...s, ...p }))
+  useEffect(() => { save('tm-settings', settings) }, [settings])
 
-  const reset = (newPassage) => {
-    clearInterval(tickRef.current)
-    setWordIdx(0)
-    setCurrent('')
-    setGrades([])
-    setStartAt(null)
-    setElapsed(0)
-    setDone(false)
-    if (newPassage) setPassageIdx((i) => i + 1)
-    setTimeout(() => inputRef.current && inputRef.current.focus(), 0)
-  }
+  const [history, setHistory] = useState(() => load('tm-history', []))
+  const [result, setResult] = useState(null)
+  const [isNewBest, setNewBest] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(custom)
+  const inputRef = useRef(null)
+  const focusInput = () => setTimeout(() => inputRef.current?.focus(), 0)
 
-  useEffect(() => {
-    localStorage.setItem('tm-lang', lang)
-    setPassageIdx(Math.floor(Math.random() * PASSAGES[lang].length))
-    reset(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, duration])
-
-  useEffect(() => () => clearInterval(tickRef.current), [])
-
-  const startTimerIfNeeded = () => {
-    if (startAt) return
-    const t0 = Date.now()
-    setStartAt(t0)
-    tickRef.current = setInterval(() => {
-      const e = Date.now() - t0
-      setElapsed(e)
-      if (e >= duration * 1000) {
-        clearInterval(tickRef.current)
-        setElapsed(duration * 1000)
-        setDone(true)
-        setGrades((g) => {
-          const ms = duration * 1000
-          const correctChars = g.reduce((n, ok, i) => n + (ok && words[i] ? words[i].length + 1 : 0), 0)
-          const wpm = fmtWpm(correctChars, ms)
-          const acc = g.length ? Math.round((g.filter(Boolean).length / g.length) * 100) : 0
-          const entry = { lang, wpm, acc, when: Date.now() }
-          const prevBest = loadBest(lang)
-          if (!prevBest || wpm > prevBest.wpm) localStorage.setItem('tm-best-' + lang, JSON.stringify(entry))
-          const h = [entry, ...loadHistory()].slice(0, 8)
-          localStorage.setItem('tm-history', JSON.stringify(h))
-          setHistory(h)
-          return g
-        })
-      }
-    }, 200)
-  }
-
-  const onChange = (e) => {
-    if (done) return
-    let v = e.target.value
-    startTimerIfNeeded()
-    if (v.endsWith(' ')) {
-      const typed = v.trim()
-      if (typed.length === 0) { setCurrent(''); return }
-      const ok = typed === words[wordIdx]
-      const newGrades = [...grades, ok]
-      setGrades(newGrades)
-      setCurrent('')
-      const next = wordIdx + 1
-      if (next >= words.length) {
-        setWordIdx(next)
-        const ms = startAt ? Date.now() - startAt : 1
-        clearInterval(tickRef.current)
-        setElapsed(ms)
-        setDone(true)
-        const correctChars = newGrades.reduce((n, o, i) => n + (o && words[i] ? words[i].length + 1 : 0), 0)
-        const wpm = fmtWpm(correctChars, ms)
-        const acc = newGrades.length ? Math.round((newGrades.filter(Boolean).length / newGrades.length) * 100) : 0
-        const entry = { lang, wpm, acc, when: Date.now() }
-        const prevBest = loadBest(lang)
-        if (!prevBest || wpm > prevBest.wpm) localStorage.setItem('tm-best-' + lang, JSON.stringify(entry))
-        const h = [entry, ...loadHistory()].slice(0, 8)
-        localStorage.setItem('tm-history', JSON.stringify(h))
-        setHistory(h)
-        return
-      }
-      setWordIdx(next)
-    } else {
-      setCurrent(v)
+  const onFinish = (res) => {
+    setResult(res)
+    const prev = load('tm-best-' + res.lang, null)
+    const best = res.mode !== 'custom' && res.total >= 10 && (!prev || res.wpm > prev.wpm)
+    if (best) save('tm-best-' + res.lang, { lang: res.lang, wpm: res.wpm, acc: res.acc, when: res.when })
+    setNewBest(best && Boolean(prev))
+    if (res.total >= 5 && res.seconds >= 3) {
+      const next = [res, ...load('tm-history', [])].slice(0, 50)
+      save('tm-history', next)
+      setHistory(next)
     }
   }
 
-  const liveMs = startAt ? elapsed : 0
-  const correctChars = grades.reduce((n, ok, i) => n + (ok && words[i] ? words[i].length + 1 : 0), 0)
-  const liveWpm = fmtWpm(correctChars, liveMs)
-  const liveAcc = grades.length ? Math.round((grades.filter(Boolean).length / grades.length) * 100) : 100
-  const remaining = Math.max(0, duration * 1000 - liveMs)
+  const test = useTypingTest({ lang, mode, limit, custom, onFinish })
+  const { reset } = test
 
-  const currentPrefixMatch = words[wordIdx] ? words[wordIdx].startsWith(current) : true
+  const restart = () => { setResult(null); setNewBest(false); reset(); focusInput() }
+  // Changing any setting resets the test; clear the old result with it.
+  useEffect(() => { setResult(null); setNewBest(false); focusInput() }, [lang, mode, limit, custom])
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Tab' && !editing) { e.preventDefault(); restart() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const stop = (fn) => (e) => { e.stopPropagation(); fn() }
+  const best = load('tm-best-' + lang, null)
+  const word = test.words[test.wordIdx]
+  const prefixOk = word ? word.startsWith(test.current) : true
+
+  // Show a window of words so long and endless texts stay readable.
+  const BLOCK = 12
+  const start = Math.max(0, Math.floor(test.wordIdx / BLOCK) * BLOCK - BLOCK)
+  const visible = test.words.slice(start, start + BLOCK * 4)
+  const third =
+    mode === 'time'
+      ? ['Time', `${Math.ceil(test.remainingMs / 1000)}s`]
+      : ['Words', `${test.graded.length}/${test.words.length}`]
+
+  const pill = (active) => `rounded-full px-3 py-1 font-medium transition ${active ? 'bg-amber text-night' : 'text-muted hover:text-ink'}`
+  const small = (active) => `rounded-full px-3 py-1 font-mono transition ${active ? 'bg-panel2 text-amber' : 'text-muted hover:text-ink'}`
+
+  const saveCustom = () => {
+    const clean = draft.trim().replace(/\s+/g, ' ')
+    if (clean.split(' ').length < 3) return
+    patch({ custom: clean, mode: 'custom' })
+    setEditing(false)
+  }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-4 py-8 sm:px-6" onClick={() => inputRef.current && inputRef.current.focus()}>
+    <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-4 py-8 sm:px-6" onClick={() => !editing && inputRef.current?.focus()}>
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">
-            Typing <span className="text-amber">Masry</span>
-          </h1>
+          <h1 className="text-xl font-bold tracking-tight">Typing <span className="text-amber">Masry</span></h1>
           <p className="text-xs text-muted">Arabic & English typing speed test</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-full border border-line bg-panel p-1 text-sm">
+          <div className="flex rounded-full border border-line bg-panel p-1 text-sm" role="group" aria-label="Language">
             {[['en', 'English'], ['ar', 'العربية']].map(([l, label]) => (
-              <button
-                key={l}
-                onClick={(e) => { e.stopPropagation(); setLang(l) }}
-                className={`rounded-full px-4 py-1 font-medium transition ${lang === l ? 'bg-amber text-night' : 'text-muted hover:text-ink'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex rounded-full border border-line bg-panel p-1 text-sm">
-            {[30, 60, 90].map((d) => (
-              <button
-                key={d}
-                onClick={(e) => { e.stopPropagation(); setDuration(d) }}
-                className={`rounded-full px-3 py-1 font-mono transition ${duration === d ? 'bg-panel2 text-amber' : 'text-muted hover:text-ink'}`}
-              >
-                {d}s
-              </button>
+              <button key={l} aria-pressed={lang === l} onClick={stop(() => patch({ lang: l }))} className={`${pill(lang === l)} px-4`}>{label}</button>
             ))}
           </div>
         </div>
       </header>
 
-      <div className="mt-6 grid grid-cols-3 gap-3">
-        {[
-          ['WPM', liveWpm],
-          ['Accuracy', liveAcc + '%'],
-          ['Time', Math.ceil(remaining / 1000) + 's'],
-        ].map(([label, val]) => (
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+        <div className="flex rounded-full border border-line bg-panel p-1" role="group" aria-label="Mode">
+          {MODES.map(([id, label]) => (
+            <button
+              key={id}
+              aria-pressed={mode === id}
+              onClick={stop(() => { if (id === 'custom' && !custom) { setDraft(''); setEditing(true) } else patch({ mode: id }) })}
+              className={pill(mode === id)}
+            >{label}</button>
+          ))}
+        </div>
+        {LIMITS[mode] && (
+          <div className="flex rounded-full border border-line bg-panel p-1" role="group" aria-label={mode === 'time' ? 'Seconds' : 'Word count'}>
+            {LIMITS[mode].map((n) => (
+              <button key={n} aria-pressed={limit === n} onClick={stop(() => patch({ limits: { ...limits, [mode]: n } }))} className={small(limit === n)}>{mode === 'time' ? `${n}s` : n}</button>
+            ))}
+          </div>
+        )}
+        {mode === 'custom' && <button onClick={stop(() => { setDraft(custom); setEditing(true) })} className="rounded-full border border-line px-3 py-1.5 text-amber hover:border-amber">Edit text</button>}
+        <div className="ml-auto flex items-center gap-1 rounded-full border border-line bg-panel p-1" role="group" aria-label="Text size">
+          <button aria-label="Smaller text" disabled={size === 0} onClick={stop(() => patch({ size: size - 1 }))} className="rounded-full px-3 py-1 text-muted hover:text-ink disabled:opacity-30">A-</button>
+          <button aria-label="Larger text" disabled={size === 2} onClick={stop(() => patch({ size: size + 1 }))} className="rounded-full px-3 py-1 text-muted hover:text-ink disabled:opacity-30">A+</button>
+          <button aria-pressed={focus} onClick={stop(() => patch({ focus: !focus }))} title="Hide the numbers while you type" className={small(focus)}>Focus</button>
+        </div>
+      </div>
+
+      <div className={`mt-4 grid grid-cols-3 gap-3 transition-opacity ${focus && test.started && !test.done ? 'opacity-0' : ''}`} aria-hidden={focus && test.started && !test.done}>
+        {[['WPM', test.wpm], ['Accuracy', `${test.acc}%`], third].map(([label, val]) => (
           <div key={label} className="rounded-2xl border border-line bg-panel px-4 py-3 text-center">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">{label}</p>
             <p className="font-en mt-1 text-2xl font-semibold text-ink">{val}</p>
@@ -183,114 +134,85 @@ export default function App() {
         ))}
       </div>
 
-      <main className="anim-rise relative mt-6 flex-1 rounded-3xl border border-line bg-panel p-6 sm:p-10">
+      <main className="anim-rise relative mt-4 flex-1 rounded-3xl border border-line bg-panel p-6 sm:p-10">
         <input
           ref={inputRef}
-          value={current}
-          onChange={onChange}
+          value={test.current}
+          onChange={(e) => test.onInput(e.target.value)}
           className="absolute h-0 w-0 opacity-0"
           autoFocus
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
           dir={isAr ? 'rtl' : 'ltr'}
-          disabled={done}
-          aria-label="typing input"
+          disabled={test.done}
+          aria-label="Typing input. Type the words shown."
         />
 
-        {!done ? (
-          <p
-            dir={isAr ? 'rtl' : 'ltr'}
-            className={`${isAr ? 'font-ar text-2xl sm:text-3xl' : 'font-en text-xl sm:text-2xl'} leading-loose`}
-            style={{ lineHeight: isAr ? 2.1 : 2 }}
-          >
-            {words.map((w, i) => {
+        {!test.done ? (
+          <p dir={isAr ? 'rtl' : 'ltr'} className={`${isAr ? `font-ar ${AR_SIZES[size]}` : `font-en ${SIZES[size]}`}`} style={{ lineHeight: isAr ? 2.1 : 2 }}>
+            {visible.map((w, k) => {
+              const i = start + k
               let cls = 'text-muted'
-              if (i < wordIdx) cls = grades[i] ? 'text-correct' : 'text-wrong underline decoration-wrong/60 underline-offset-4'
-              if (i === wordIdx) cls = currentPrefixMatch ? 'text-ink' : 'text-wrong'
-              const isCurrent = i === wordIdx
+              if (i < test.wordIdx) cls = test.graded[i]?.ok ? 'text-correct' : 'text-wrong underline decoration-wrong/60 underline-offset-4'
+              if (i === test.wordIdx) cls = prefixOk ? 'text-ink' : 'text-wrong'
+              const cur = i === test.wordIdx
               return (
-                <span key={i} className={isCurrent ? 'relative rounded-md bg-panel2 px-1' : 'px-1'}>
-                  {isCurrent && (
-                    <span className={`caret absolute top-1 bottom-1 w-[3px] rounded bg-amber ${isAr ? '-right-0.5' : '-left-0.5'}`} />
-                  )}
-                  <span className={cls}>{w}</span>
-                  {' '}
+                <span key={i} className={cur ? 'relative rounded-md bg-panel2 px-1' : 'px-1'}>
+                  {cur && <span className={`caret absolute top-1 bottom-1 w-[3px] rounded bg-amber ${isAr ? '-right-0.5' : '-left-0.5'}`} />}
+                  <span className={cls}>{w}</span>{' '}
                 </span>
               )
             })}
           </p>
-        ) : (
+        ) : result ? (
           <Results
-            wpm={liveWpm}
-            acc={liveAcc}
-            correctWords={grades.filter(Boolean).length}
-            totalWords={grades.length}
-            best={loadBest(lang)}
+            result={result}
+            graded={test.graded}
+            samples={test.samples}
+            best={best}
+            isNewBest={isNewBest}
             isAr={isAr}
-            onRestart={() => reset(true)}
+            onRestart={restart}
+            onNewText={mode === 'time' || mode === 'custom' ? null : restart}
           />
-        )}
+        ) : null}
 
-        {!done && !startAt && (
-          <p className="mt-6 text-center text-sm text-muted">Start typing - the clock begins on your first character.</p>
+        {!test.done && !test.started && (
+          <p className="mt-6 text-center text-sm text-muted">
+            {mode === 'time' ? 'Start typing. The clock begins on your first character.' : 'Start typing. Press Space after each word.'}
+          </p>
         )}
       </main>
 
-      <section className="mt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted">Recent tests</h2>
-          <button onClick={(e) => { e.stopPropagation(); reset(true) }} className="rounded-full border border-line bg-panel px-4 py-1.5 text-sm font-medium text-amber transition hover:border-amber">
-            New passage
-          </button>
+      <StatsPanel history={history} onClear={() => { remove('tm-history'); remove('tm-best-en'); remove('tm-best-ar'); setHistory([]) }} />
+
+      {editing && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={(e) => { e.stopPropagation(); setEditing(false) }}>
+          <div role="dialog" aria-modal="true" aria-label="Custom text" className="w-full max-w-lg rounded-2xl border border-line bg-panel p-5" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-semibold">Practise your own text</h2>
+            <p className="mt-1 text-xs text-muted">Paste a paragraph in {isAr ? 'Arabic' : 'English'} or any language. At least 3 words.</p>
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              dir="auto"
+              rows={6}
+              className="mt-3 w-full rounded-xl border border-line bg-night p-3 text-sm"
+              aria-label="Custom text"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button onClick={() => setEditing(false)} className="rounded-full px-4 py-2 text-sm text-muted hover:text-ink">Cancel</button>
+              <button onClick={saveCustom} disabled={draft.trim().split(/\s+/).filter(Boolean).length < 3} className="rounded-full bg-amber px-5 py-2 text-sm font-semibold text-night disabled:opacity-40">Use this text</button>
+            </div>
+          </div>
         </div>
-        {history.length ? (
-          <ul className="mt-3 space-y-2">
-            {history.map((h, i) => (
-              <li key={i} className="flex items-center justify-between rounded-xl border border-line bg-panel px-4 py-2 text-sm">
-                <span className={h.lang === 'ar' ? 'font-ar' : 'font-en'}>{h.lang === 'ar' ? 'العربية' : 'English'}</span>
-                <span className="font-en"><span className="text-amber font-semibold">{h.wpm}</span> wpm</span>
-                <span className="font-en text-muted">{h.acc}%</span>
-                <span className="text-xs text-muted">{new Date(h.when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 text-sm text-muted">No tests yet. Your last eight results land here.</p>
-        )}
-      </section>
+      )}
 
       <footer className="mt-8 text-center text-xs text-muted">
-        Arabic grading works per word, not per letter - so letter joining (الشكل المتصل) is never broken.
-        Best {lang === 'ar' ? 'Arabic' : 'English'} score: {best ? best.wpm + ' wpm' : '-'}
+        Arabic grading works per word, not per letter, so letter joining (الشكل المتصل) is never broken.
+        Best {isAr ? 'Arabic' : 'English'} score: {best ? best.wpm + ' wpm' : '-'}
       </footer>
-    </div>
-  )
-}
-
-function Results({ wpm, acc, correctWords, totalWords, best, isAr, onRestart }) {
-  return (
-    <div className="anim-rise py-6 text-center">
-      <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted">Time is up</p>
-      <p className="font-en mt-3 text-6xl font-semibold text-amber sm:text-7xl">{wpm}</p>
-      <p className="mt-1 text-sm text-muted">words per minute</p>
-      <div className="mx-auto mt-6 grid max-w-md grid-cols-3 gap-3">
-        <div className="rounded-2xl border border-line bg-panel2 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-widest text-muted">Accuracy</p>
-          <p className="font-en mt-1 text-xl text-ink">{acc}%</p>
-        </div>
-        <div className="rounded-2xl border border-line bg-panel2 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-widest text-muted">Words</p>
-          <p className="font-en mt-1 text-xl text-ink">{correctWords}/{totalWords}</p>
-        </div>
-        <div className="rounded-2xl border border-line bg-panel2 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-widest text-muted">Best {isAr ? 'AR' : 'EN'}</p>
-          <p className="font-en mt-1 text-xl text-ink">{best ? best.wpm : '-'}</p>
-        </div>
-      </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); onRestart() }}
-        className="mt-8 rounded-full bg-amber px-8 py-3 font-semibold text-night transition hover:brightness-110"
-      >
-        Go again
-      </button>
     </div>
   )
 }
